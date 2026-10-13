@@ -1,0 +1,65 @@
+name: Deploy i386 APT Repo to Pages
+
+on:
+  push:
+    branches:
+      - main  # или master
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install APT utilities
+        run: sudo apt-get update && sudo apt-get install -y apt-utils gnupg
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Generate APT Repository
+        run: |
+          # Создаем директорию именно для i386
+          mkdir -p dists/stable/main/binary-i386
+          
+          # 1. Сканируем исключительно i386 пакеты
+          apt-ftparchive packages pool/main/ > dists/stable/main/binary-i386/Packages
+          gzip -k -f dists/stable/main/binary-i386/Packages
+          xz -k -f dists/stable/main/binary-i386/Packages
+          
+          # Создаем временный конфиг, чтобы явно указать APT, что в репозитории только i386
+          cat <<EOF > apt-release.conf
+          APT::FTPArchive::Release::Origin "My Custom i386 Repo";
+          APT::FTPArchive::Release::Label "My Repo";
+          APT::FTPArchive::Release::Suite "stable";
+          APT::FTPArchive::Release::Codename "stable";
+          APT::FTPArchive::Release::Architectures "i386";
+          APT::FTPArchive::Release::Components "main";
+          EOF
+
+          # 2. Создаем Release файл с использованием конфига
+          apt-ftparchive -c apt-release.conf release dists/stable/ > dists/stable/Release
+          rm apt-release.conf
+          
+          # 3. Подписываем релиз
+          gpg --batch --yes -u "persikntcomp@gmail.com" --clearsign -o dists/stable/InRelease dists/stable/Release
+          gpg --batch --yes -u "persikntcomp@gmail.com" -abs -o dists/stable/Release.gpg dists/stable/Release
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
