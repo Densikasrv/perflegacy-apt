@@ -3,7 +3,7 @@ name: Deploy i386 APT Repo to Pages
 on:
   push:
     branches:
-      - main  # или master
+      - main  # Если ваша ветка называется master, замените main на master
 
 permissions:
   contents: read
@@ -12,9 +12,6 @@ permissions:
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -23,37 +20,39 @@ jobs:
       - name: Install APT utilities
         run: sudo apt-get update && sudo apt-get install -y apt-utils gnupg
 
+      # Импорт приватного ключа. Опция --pinentry-mode loopback нужна, если у ключа есть пароль.
       - name: Import GPG key
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import --pinentry-mode loopback
 
       - name: Generate APT Repository
         run: |
-          # Создаем директорию именно для i386
+          # Создаем структуру папок для архитектуры i386
           mkdir -p dists/stable/main/binary-i386
           
-          # 1. Сканируем исключительно i386 пакеты
+          # 1. Сканируем пакеты и создаем индексы Packages
           apt-ftparchive packages pool/main/ > dists/stable/main/binary-i386/Packages
           gzip -k -f dists/stable/main/binary-i386/Packages
           xz -k -f dists/stable/main/binary-i386/Packages
           
-          # Создаем временный конфиг, чтобы явно указать APT, что в репозитории только i386
+          # Создаем конфигурацию релиза, принудительно указывая только i386
           cat <<EOF > apt-release.conf
-          APT::FTPArchive::Release::Origin "My Custom i386 Repo";
-          APT::FTPArchive::Release::Label "My Repo";
+          APT::FTPArchive::Release::Origin "Perflegacy-apt Repo";
+          APT::FTPArchive::Release::Label "Perflegacy-apt";
           APT::FTPArchive::Release::Suite "stable";
           APT::FTPArchive::Release::Codename "stable";
           APT::FTPArchive::Release::Architectures "i386";
           APT::FTPArchive::Release::Components "main";
           EOF
 
-          # 2. Создаем Release файл с использованием конфига
+          # 2. Генерируем главный файл Release
           apt-ftparchive -c apt-release.conf release dists/stable/ > dists/stable/Release
           rm apt-release.conf
           
-          # 3. Подписываем релиз
-          gpg --batch --yes -u "persikntcomp@gmail.com" --clearsign -o dists/stable/InRelease dists/stable/Release
-          gpg --batch --yes -u "persikntcomp@gmail.com" -abs -o dists/stable/Release.gpg dists/stable/Release
+          # 3. Подписываем репозиторий. 
+          # Если при создании ключа вы задавали пароль (passphrase), добавьте в команду ниже аргумент: --passphrase "${{ secrets.GPG_PASSPHRASE }}"
+          gpg --batch --yes --pinentry-mode loopback --clearsign -o dists/stable/InRelease dists/stable/Release
+          gpg --batch --yes --pinentry-mode loopback -abs -o dists/stable/Release.gpg dists/stable/Release
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
