@@ -3,7 +3,7 @@ name: Deploy i386 APT Repo to Pages
 on:
   push:
     branches:
-      - main  # Если ваша ветка называется master, замените main на master
+      - main  # Если ваша ветка называется master, замените main на masterы
 
 permissions:
   contents: read
